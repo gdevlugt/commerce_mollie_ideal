@@ -1,0 +1,9 @@
+name = Mollie iDEAL
+description = Implements Mollie iDEAL payment services for use with Drupal Commerce.
+package = Commerce
+dependencies[] = commerce
+dependencies[] = commerce_payment
+core = 7.x
+
+; Base module files
+files[] = commerce_mollie_ideal.module

@@ -1,0 +1,154 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Implements Mollie iDEAL payment services for use with Drupal Commerce.
+ *
+ * Geoffrey de Vlugt - Renaissance IT
+ */
+
+include_once('ideal.class.php'); // Mollie iDEAL API class
+
+/**
+ * Implements hook_commerce_payment_method_info().
+ */
+function commerce_mollie_ideal_commerce_payment_method_info() {
+  $payment_methods = array();
+
+  $payment_methods['commerce_mollie_ideal'] = array(
+    'title' => t('Mollie iDEAL'),
+    'description' => t('Integrates Mollie iDEAL payment services support.'),
+    'active' => TRUE,
+    'offsite' => TRUE,
+  );
+
+  return $payment_methods;
+}
+
+/**
+ * Payment method callback: settings form.
+ */
+function commerce_mollie_ideal_settings_form($settings = NULL) {
+  $form['commerce_mollie_ideal_partner_id'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Mollie Partner ID'),
+    '#description' => t('Your Mollie partner ID.'),
+    '#default_value' => $settings['commerce_mollie_ideal_partner_id'],
+    '#required' => TRUE,
+  );
+
+  $form['commerce_mollie_ideal_profile_key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Mollie Profile key'),
+    '#description' => t('Your Mollie profile key.'),
+    '#default_value' => $settings['commerce_mollie_ideal_profile_key'],
+    '#required' => TRUE,
+  );
+
+  $form['commerce_mollie_ideal_test_mode'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Enable test mode'),
+    '#description' => t('Check this option to enable test mode.'),
+    '#default_value' => $settings['commerce_mollie_ideal_test_mode'],
+  );
+
+  return $form;
+}
+
+/**
+ * Payment method callback: submit form.
+ */
+function commerce_mollie_ideal_submit_form($payment_method, $pane_values, $checkout_pane, $order) {
+  $form = array();
+
+  // Merge in values from the order.
+  if (!empty($order->data['commerce_mollie_ideal'])) {
+    $pane_values += $order->data['commerce_mollie_ideal'];
+  }
+
+
+  // Instantiate iDEAL_Payment object.
+  $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
+  $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
+   
+  $form['commerce_mollie_ideal_bank'] = array(
+    '#type' => 'select',
+    '#title' => t('Bank'),
+    '#options' => $iDEAL->getBanks(),
+    '#description' => t('Please select your bank.'),
+  );
+
+  return $form;
+}
+
+/**
+ * Payment method callback: submit form validation.
+ */
+function commerce_mollie_ideal_submit_form_validate($payment_method, $pane_form, $pane_values, $order, $form_parents = array()) {
+  // Instantiate iDEAL_Payment object.
+  $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
+  $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
+
+  // Throw an error if the chosen bank isn't available through Mollie.
+  if (in_array($pane_values['commerce_mollie_ideal_bank'], array_keys($iDEAL->getBanks())) === FALSE) {
+    form_set_error(implode('][', array_merge($form_parents, array('commerce_mollie_ideal_bank'))), t('The bank you chose is not available.'));    
+    return FALSE;
+  }
+}
+
+/**
+ * Payment method callback: submit form submission.
+ */
+function commerce_mollie_ideal_submit_form_submit($payment_method, $pane_form, $pane_values, $order, $charge) {
+  $order->data['commerce_mollie_ideal'] = $pane_values;
+//  commerce_mollie_ideal_transaction($payment_method, $order, $charge, $pane_values['name']);
+}
+
+/**
+ * Payment method callback: redirect form
+ *
+ * returns form elements that should be submitted to the redirected
+ * payment service
+ */
+function commerce_mollie_ideal_redirect_form($form, &$form_state, $order, $payment_method) {
+  $wrapper = entity_metadata_wrapper('commerce_order', $order);
+  
+  // Get amount (in cents)
+  $amount = $wrapper->commerce_order_total->amount->value();
+
+  // Order description which will be submitted to Mollie.
+  $payment_description  = t("Order @order_id - @site_name", array('@order_id' => $order->order_number, '@site_name' => variable_get('site_name', '')));
+  
+  // Instantiate iDEAL_Payment object.
+  $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
+  $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
+dsm($order);
+  // Set feedback URLs
+  $settings = array(
+    // Return to the previous page when payment is canceled
+    'cancel_return' => url('checkout/' . $order->order_id . '/payment/back/' . $order->data['payment_redirect_key'], array('absolute' => TRUE)),
+
+    // Return to the payment redirect page for processing successful payments
+    'return' => url('checkout/' . $order->order_id . '/payment/return/' . $order->data['payment_redirect_key'], array('absolute' => TRUE)),
+
+    // Specify the current payment method instance ID in the notify_url
+    'payment_method' => $payment_method['instance_id'],
+  );
+
+  // Create a payment.
+  if ($iDEAL->createPayment($order->data['commerce_mollie_ideal']['commerce_mollie_ideal_bank'], $amount, $payment_description, $settings['return'], $settings['return'])) {
+    $form['#action'] = $iDEAL->getBankURL();
+    $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Proceed with payment'),
+    );
+  }
+  else{
+    watchdog('commerce_mollie_ideal', 'Could not create a Mollie payment. Error: %error', array('%error' => $iDEAL->getErrorMessage()), WATCHDOG_ERROR);
+    drupal_set_message(t('An error occured while preparing your iDEAL payment. Please try again or contact the webmaster.'), 'error');
+    drupal_goto($settings['cancel_return']);
+  }  
+
+  return $form;
+}
