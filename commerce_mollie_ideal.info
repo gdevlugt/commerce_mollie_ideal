@@ -4,6 +4,7 @@ package = Commerce
 dependencies[] = commerce
 dependencies[] = commerce_payment
 core = 7.x
+version = 7.x-1.0
 
 ; Base module files
 files[] = commerce_mollie_ideal.module
