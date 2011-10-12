@@ -30,6 +30,15 @@ function commerce_mollie_ideal_commerce_payment_method_info() {
  * Payment method callback: settings form.
  */
 function commerce_mollie_ideal_settings_form($settings = NULL) {
+  $form = array();
+  
+  // Merge default settings into the stored settings array.
+  $settings = (array) $settings + array(
+    'commerce_mollie_ideal_partner_id' => '',
+    'commerce_mollie_ideal_profile_key' => '',
+    'commerce_mollie_ideal_test_mode' => 0,
+  );
+  
   $form['commerce_mollie_ideal_partner_id'] = array(
     '#type' => 'textfield',
     '#title' => t('Mollie Partner ID'),
