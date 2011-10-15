@@ -15,17 +15,19 @@ include_once('ideal.class.php'); // Mollie iDEAL API class
  */
 function commerce_mollie_ideal_menu() {
   $items = array();
-
-  $items['cart/checkout/commerce_mollie_ideal/return'] = array(
+  
+  $items['commerce_ideal/report/%/%'] = array(
     'title' => 'Mollie iDEAL Payment',
-    'page callback' => 'commerce_mollie_ideal_return',
+    'page callback' => 'commerce_mollie_ideal_report',
+    'page arguments' => array(2, 3),
     'access arguments' => array('access content'),
     'type' => MENU_CALLBACK,
   );
-  
-  $items['cart/checkout/commerce_mollie_ideal/report'] = array(
+
+  $items['commerce_ideal/return/%/%'] = array(
     'title' => 'Mollie iDEAL Payment',
-    'page callback' => 'commerce_mollie_ideal_report',
+    'page callback' => 'commerce_mollie_ideal_return',
+    'page arguments' => array(2, 3),
     'access arguments' => array('access content'),
     'type' => MENU_CALLBACK,
   );
@@ -49,9 +51,9 @@ function commerce_mollie_ideal_commerce_payment_method_info() {
   return $payment_methods;
 }
 
-/**
- * Payment method callback: settings form.
- */
+ /**
+  * Implements hook_commerce_settings_form().
+  */
 function commerce_mollie_ideal_settings_form($settings = NULL) {
   $form = array();
   
@@ -89,8 +91,8 @@ function commerce_mollie_ideal_settings_form($settings = NULL) {
 }
 
 /**
- * Payment method callback: submit form.
- */
+ * Implements hook_commerce_submit_form().
+ */ 
 function commerce_mollie_ideal_submit_form($payment_method, $pane_values, $checkout_pane, $order) {
   $form = array();
 
@@ -114,7 +116,7 @@ function commerce_mollie_ideal_submit_form($payment_method, $pane_values, $check
 }
 
 /**
- * Payment method callback: submit form validation.
+ * Implements hook_commerce_submit_form_validate().
  */
 function commerce_mollie_ideal_submit_form_validate($payment_method, $pane_form, $pane_values, $order, $form_parents = array()) {
   // Instantiate iDEAL_Payment object.
@@ -129,15 +131,14 @@ function commerce_mollie_ideal_submit_form_validate($payment_method, $pane_form,
 }
 
 /**
- * Payment method callback: submit form submission.
+ * Implements hook_commerce_submit_form_submit().
  */
 function commerce_mollie_ideal_submit_form_submit($payment_method, $pane_form, $pane_values, $order, $charge) {
   $order->data['commerce_mollie_ideal'] = $pane_values;
-//  commerce_mollie_ideal_transaction($payment_method, $order, $charge, $pane_values['name']);
 }
 
 /**
- * Payment method callback: redirect form
+ * Implements hook_commerce_redirect_form().
  *
  * returns form elements that should be submitted to the redirected
  * payment service
@@ -150,33 +151,28 @@ function commerce_mollie_ideal_redirect_form($form, &$form_state, $order, $payme
 
   // Order description which will be submitted to Mollie.
   $payment_description  = t("Order @order_id - @site_name", array('@order_id' => $order->order_number, '@site_name' => variable_get('site_name', '')));
-  
+
+  // Create a transaction.
+  $transaction_id = commerce_mollie_ideal_transaction($payment_method, $order, $amount, '');
+
   // Instantiate iDEAL_Payment object.
   $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
   $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
 
-  // Set feedback URLs
-  $settings = array(
-    // Return to the previous page when payment is canceled
-    'cancel_return' => url('checkout/' . $order->order_id . '/payment/back/' . $order->data['payment_redirect_key'], array('absolute' => TRUE)),
-
-    // Return to the payment redirect page for processing successful payments
-    'return' => url('checkout/' . $order->order_id . '/payment/return/' . $order->data['payment_redirect_key'], array('absolute' => TRUE)),
-
-    // Specify the current payment method instance ID in the notify_url
-    'payment_method' => $payment_method['instance_id'],
-  );
+  $return_url = url('commerce_ideal/return/' . $order->order_id . '/' . $transaction_id, array('absolute' => TRUE));
+  $report_url = url('commerce_ideal/report/' . $order->order_id . '/' . $transaction_id, array('absolute' => TRUE));
 
   // Create a payment.
-  if ($iDEAL->createPayment($order->data['commerce_mollie_ideal']['commerce_mollie_ideal_bank'], $amount, $payment_description, $settings['return'], $settings['cancel_return'])) {
-    $_SESSION['commerce_mollie_ideal']['order_id'] = $order->order_id;
-    $_SESSION['commerce_mollie_ideal']['transaction_id'] = $iDEAL->getTransactionId();
+  if ($iDEAL->createPayment($order->data['commerce_mollie_ideal']['commerce_mollie_ideal_bank'], $amount, $payment_description, $return_url, $report_url)) {
+//    $_SESSION['commerce_mollie_ideal']['order_id'] = $order->order_id;
+//    $_SESSION['commerce_mollie_ideal']['transaction_id'] = $iDEAL->getTransactionId();
 
     $form['#action'] = $iDEAL->getBankURL();
     $form['submit'] = array(
       '#type' => 'submit',
       '#value' => t('Proceed with payment'),
     );
+    commerce_mollie_ideal_transaction_set_mollie_transaction_id($transaction_id, $iDEAL->getTransactionId());
   }
   else{
     watchdog('commerce_mollie_ideal', 'Could not create a Mollie payment. Error: %error', array('%error' => $iDEAL->getErrorMessage()), WATCHDOG_ERROR);
@@ -187,42 +183,71 @@ function commerce_mollie_ideal_redirect_form($form, &$form_state, $order, $payme
   return $form;
 }
 
-function commerce_mollie_ideal_return() {
+function commerce_mollie_ideal_return($order_id, $transaction_id) {
+  $transaction = commerce_payment_transaction_load($transaction_id);
+
+  if ($transaction->status == COMMERCE_PAYMENT_STATUS_SUCCESS) {
+    return 'Payment ok';
+  }
+  else {
+    return 'Payment not cleared or not ok';
+  }
 }  
 
-function commerce_mollie_ideal_report() {
+function commerce_mollie_ideal_report($order_id, $transaction_id) {
+  $transaction = commerce_payment_transaction_load($transaction_id);
+  $payment_method = commerce_payment_method_instance_load($transaction->instance_id); // $_GET['transaction_id']
+
+  // Instantiate iDEAL_Payment object.
+  $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
+  $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
+  
+  // Check if the payment succeeded or not.
+  $iDEAL->checkPayment($_GET['transaction_id']);
+  
+  if ($iDEAL->getPaidStatus() == TRUE) {
+    commerce_mollie_ideal_transaction_set_status($transaction_id, COMMERCE_PAYMENT_STATUS_SUCCESS);
+  }
 }  
 
-function commerce_mollie_ideal_transaction_get($transaction_id) {
-  $query = db_select('commerce_mollie_ideal');
-  $query->addField('commerce_mollie_ideal', 'order_id');
-  $query->addField('commerce_mollie_ideal', 'transaction_id');
-  $query->addField('commerce_mollie_ideal', 'status');
-  $query->condition('transaction_id', check_plain($transaction_id));
+/**
+ * Creates an Mollie iDEAL payment transaction for the specified charge amount.
+ *
+ * @param $payment_method
+ *   The payment method instance object used to charge this payment.
+ * @param $order
+ *   The order object the payment applies to.
+ * @param $charge
+ *   An array indicating the amount and currency code to charge.
+ * @param $name
+ *   The name entered on the submission form.
+ * @param $mollie_transaction_id
+ *   The Mollie iDEAL transaction ID.
+ */
+function commerce_mollie_ideal_transaction($payment_method, $order, $amount) {
+  $transaction = commerce_payment_transaction_new('commerce_mollie_ideal', $order->order_id);
+  $transaction->instance_id = $payment_method['instance_id'];
+  $transaction->amount = $amount;
+  $transaction->currency_code = 'EUR';
+  $transaction->status = COMMERCE_PAYMENT_STATUS_PENDING;
+//  $transaction->message = 'Name: @name';
+//  $transaction->message_variables = array('@name' => $name);
   
-  return $query->execute();
+  commerce_payment_transaction_save($transaction);
+
+  return $transaction->transaction_id;
 }
 
-function commerce_mollie_ideal_transaction_create($transaction) {
-  $query = db_insert('commerce_mollie_ideal');
-  $query->fields(array(
-    'order_id' => $transaction['order_id'],
-    'transaction_id' => $transaction['transaction_id'],
-    'bank_id' => $transaction['bank_id'],
-    'description' => $transaction['description'],
-    'amount' => $transaction['amount'],
-    'status' => $transaction['status'],
-  ));
-  
-  return $query->execute(); 
+function commerce_mollie_ideal_transaction_set_mollie_transaction_id($transaction_id, $mollie_transaction_id) {
+  $transaction = commerce_payment_transaction_load($transaction_id);
+  $transaction->remote_id = $mollie_transaction_id;
+  commerce_payment_transaction_save($transaction);
 }
 
-function commerce_mollie_ideal_transaction_status_update($transaction_id, $status = 0) {
-  $query = db_update('commerce_mollie_ideal');
-  $query->fields(array(
-    'status' => $status,
-  ));
-  $query->condition('transaction_id', check_plain($transaction_id));
-  
-  return $query->execute(); 
+function commerce_mollie_ideal_transaction_set_status($transaction_id, $status) {
+  $transaction =  commerce_payment_transaction_load($transaction_id);
+  $transaction->status = $status;
+  commerce_payment_transaction_save($transaction);
 }
+
+
