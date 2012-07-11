@@ -9,7 +9,8 @@
  */
 
 // Mollie iDEAL API class
-include_once('ideal.class.php');
+//include_once('ideal.class.php');
+include_once('Mollie/iDEAL/Payment.php');
 
 /**
  * Implements hook_menu().
@@ -104,14 +105,14 @@ function commerce_mollie_ideal_submit_form($payment_method, $pane_values, $check
   }
 
   // Instantiate iDEAL_Payment object.
-  $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
+  $iDEAL = new Mollie_iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
   $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
 
   $form['commerce_mollie_ideal_bank'] = array(
     '#type' => 'select',
     '#title' => t('Bank'),
     '#options' => $iDEAL->getBanks(),
-    '#default_value' => $payment_method['settings']['commerce_mollie_ideal_test_mode'] == 0 ? $order->data['commerce_mollie_ideal']['commerce_mollie_ideal_bank'] : '',
+//    '#default_value' => $payment_method['settings']['commerce_mollie_ideal_test_mode'] == 0 ? $order->data['commerce_mollie_ideal']['commerce_mollie_ideal_bank'] : '',
     '#description' => t('Please select your bank.'),
   );
 
@@ -123,7 +124,7 @@ function commerce_mollie_ideal_submit_form($payment_method, $pane_values, $check
  */
 function commerce_mollie_ideal_submit_form_validate($payment_method, $pane_form, $pane_values, $order, $form_parents = array()) {
   // Instantiate iDEAL_Payment object.
-  $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
+  $iDEAL = new Mollie_iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
   $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
 
   // Throw an error if the chosen bank isn't available through Mollie.
@@ -162,7 +163,7 @@ function commerce_mollie_ideal_redirect_form($form, &$form_state, $order, $payme
   $transaction_id = $order->data['transaction_id'];
 
   // Instantiate iDEAL_Payment object.
-  $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
+  $iDEAL = new Mollie_iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
   $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
 
   // The url of the page the customer should be returned back to by Mollie.
@@ -172,12 +173,10 @@ function commerce_mollie_ideal_redirect_form($form, &$form_state, $order, $payme
 
   // Create a payment.
   if ($iDEAL->createPayment($order->data['commerce_mollie_ideal']['commerce_mollie_ideal_bank'], $amount, $payment_description, $return_url, $report_url)) {
-    $form['#action'] = $iDEAL->getBankURL();
-    $form['submit'] = array(
-      '#type' => 'submit',
-      '#value' => t('Proceed with payment'),
-    );
     commerce_mollie_ideal_transaction_set_mollie_transaction_id($transaction_id, $iDEAL->getTransactionId());
+    
+    header("Location: " . $iDEAL->getBankURL());
+    exit;
   }
   else {
     watchdog('commerce_mollie_ideal', 'Could not create a Mollie payment. Error: %error', array('%error' => $iDEAL->getErrorMessage()), WATCHDOG_ERROR);
@@ -210,7 +209,7 @@ function commerce_mollie_ideal_report($order_id, $transaction_id) {
   $order = commerce_order_load($transaction->order_id);
 
   // Instantiate iDEAL_Payment object.
-  $iDEAL = new iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
+  $iDEAL = new Mollie_iDEAL_Payment($payment_method['settings']['commerce_mollie_ideal_partner_id']);
   $iDEAL->setTestmode($payment_method['settings']['commerce_mollie_ideal_test_mode']);
   
   // Check if the payment succeeded or not.

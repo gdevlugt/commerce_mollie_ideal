@@ -1,52 +1,61 @@
 <?php
-/*-----------------------------------------------------------------------
-  Start              : 24 februari 2009
-  Door               : Mollie B.V. (RDF) © 2009
-
-  Versie             : 1.13 (gebaseerd op de Mollie iDEAL class van
-                       Concepto IT Solution - http://www.concepto.nl/)
-  Laatste aanpassing : 18-04-2011
-  Aard v. aanpassing : Ondersteuning voor het nieuwe 'status' veld
-  Door               : MK
-	-----------------------------------------------------------------------*/
-
-class iDEAL_Payment
+/**
+ * Kant en klare class om met Mollie iDEAL aan de slag te gaan.
+ *
+ * @link https://www.mollie.nl/support/documentatie/betaaldiensten/ideal/
+ */
+class Mollie_iDEAL_Payment
 {
+	/**
+	 * Minimum bedrag in cent.
+	 */
+	const MIN_TRANS_AMOUNT = 118;
 
-	const     MIN_TRANS_AMOUNT = 118;
+	protected $partner_id;
+	protected $profile_key;
 
-	protected $partner_id      = null;
-	protected $profile_key     = null;
-		
-	protected $testmode        = false;
+	protected $testmode = false;
 
-	protected $bank_id         = null;
-	protected $amount          = 0;
-	protected $description     = null;
-	protected $return_url      = null;
-	protected $report_url      = null;
+	protected $bank_id;
 
-	protected $bank_url        = null;
-	protected $payment_url     = null;
+	/**
+	 * Bank status
+	 */
+	protected $status;
 
-	protected $transaction_id  = null;
+	/**
+	 * Het bedrag in centen.
+	 *
+	 * @var int
+	 */
+	protected $amount = 0;
+	protected $description;
+	protected $return_url;
+	protected $report_url;
+
+	protected $bank_url;
+	protected $payment_url;
+
+	protected $transaction_id;
 	protected $paid_status     = false;
 	protected $consumer_info   = array();
 
 	protected $error_message   = '';
 	protected $error_code      = 0;
 
-	protected $api_host        = 'ssl://secure.mollie.nl';
+	protected $api_host        = 'https://secure.mollie.nl';
 	protected $api_port        = 443;
 
-	public function __construct ($partner_id, $api_host = 'ssl://secure.mollie.nl', $api_port = 443)
+	public function __construct ($partner_id)
 	{
 		$this->partner_id = $partner_id;
-		$this->api_host   = $api_host;
-		$this->api_port   = $api_port;
 	}
 
-	// Haal de lijst van beschikbare banken
+	/**
+	 * Haal de lijst van beschikbare banken
+	 *
+	 * @return array
+	 */
 	public function getBanks()
 	{
 		$query_variables = array (
@@ -59,8 +68,6 @@ class iDEAL_Payment
 		}
 
 		$banks_xml = $this->_sendRequest (
-			$this->api_host,
-			$this->api_port,
 			'/xml/ideal/',
 			http_build_query($query_variables, '', '&')
 		);
@@ -84,7 +91,16 @@ class iDEAL_Payment
 		return $banks_array;
 	}
 
-	// Zet een betaling klaar bij de bank en maak de betalings URL beschikbaar
+	/**
+	 * Zet een betaling klaar bij de bank en maak de betalings URL beschikbaar
+	 *
+	 * @param $bank_id
+	 * @param $amount
+	 * @param $description
+	 * @param $return_url
+	 * @param $report_url
+	 * @return bool
+	 */
 	public function createPayment ($bank_id, $amount, $description, $return_url, $report_url)
 	{
 		if (!$this->setBankId($bank_id) or
@@ -108,13 +124,13 @@ class iDEAL_Payment
 		);
 		
 		if ($this->profile_key)
+		{
 			$query_variables['profile_key'] = $this->profile_key;
+		}
 
 		$create_xml = $this->_sendRequest(
-			$this->api_host,
-			$this->api_port,
 			'/xml/ideal/',
-			http_build_query($query_variables, '', '&')			
+			http_build_query($query_variables, '', '&')
 		);
 
 		if (empty($create_xml)) {
@@ -133,7 +149,12 @@ class iDEAL_Payment
 		return true;
 	}
 
-	// Kijk of er daadwerkelijk betaald is
+	/**
+	 * Kijk of er daadwerkelijk betaald is.
+	 *
+	 * @param $transaction_id
+	 * @return bool
+	 */
 	public function checkPayment ($transaction_id)
 	{
 		if (!$this->setTransactionId($transaction_id)) {
@@ -152,8 +173,6 @@ class iDEAL_Payment
 		}
 
 		$check_xml = $this->_sendRequest(
-			$this->api_host,
-			$this->api_port,
 			'/xml/ideal/',
 			http_build_query($query_variables, '', '&')
 			);
@@ -191,8 +210,6 @@ class iDEAL_Payment
 		);
 
 		$create_xml = $this->_sendRequest(
-			$this->api_host,
-			$this->api_port,
 			'/xml/ideal/',
 			http_build_query($query_variables, '', '&')
 			);
@@ -204,76 +221,30 @@ class iDEAL_Payment
 		}
 
 		$this->payment_url = (string) $create_object->link->URL;
+		return true;
 	}
 
 /*
 	PROTECTED FUNCTIONS
 */
 
-	protected function _sendRequest ($host, $port, $path, $data)
+	/**
+	 * Verstuur een HTTP verzoek naar de Mollie API.
+	 *
+	 * @param $path string
+	 * @param $data string
+	 * @return bool|string
+	 */
+	protected function _sendRequest ($path, $data = '')
 	{
-		if (function_exists('curl_init')) {
-			return $this->_sendRequestCurl($host, $port, $path, $data);
-		}
-		else {
-			return $this->_sendRequestFsock($host, $port, $path, $data);
-		}
-	}
-
-	protected function _sendRequestFsock ($host, $port, $path, $data)
-	{
-		$hostname = str_replace('ssl://', '', $host);
-		$fp = @fsockopen($host, $port, $errno, $errstr);
-		$buf = '';
-
-		if (!$fp)
-		{
-			$this->error_message = 'Kon geen verbinding maken met server: ' . $errstr;
-			$this->error_code		= 0;
-
-			return false;
-		}
-
-		@fputs($fp, "POST $path HTTP/1.0\n");
-		@fputs($fp, "Host: $hostname\n");
-		@fputs($fp, "Content-type: application/x-www-form-urlencoded\n");
-		@fputs($fp, "Content-length: " . strlen($data) . "\n");
-		@fputs($fp, "Connection: close\n\n");
-		@fputs($fp, $data);
-
-		while (!feof($fp)) {
-			$buf .= fgets($fp, 128);
-		}
-
-		fclose($fp);
-
-		if (empty($buf))
-		{
-			$this->error_message = 'Zero-sized reply';
-			return false;
-		}
-		else {
-			list($headers, $body) = preg_split("/(\r?\n){2}/", $buf, 2);
-		}
-
-		return $body;
-	}
-	
-	protected function _sendRequestCurl ($host, $port, $path, $data)
-	{
-		$host = str_replace('ssl://', 'https://', $host);
-		
 		$ch = curl_init();
 		
-		curl_setopt($ch, CURLOPT_URL, $host . $path);
-		curl_setopt($ch, CURLOPT_PORT, $port);
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-		curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+		curl_setopt($ch, CURLOPT_URL, $this->api_host . $path);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_TIMEOUT, 10);
 		curl_setopt($ch, CURLOPT_HEADER, false);
 		curl_setopt($ch, CURLOPT_POST, true);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $data);		
+		curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
 		
 		$body = curl_exec($ch);
 		
@@ -284,24 +255,28 @@ class iDEAL_Payment
 
 	protected function _XMLtoObject ($xml)
 	{
-		try
+		$xml_object = simplexml_load_string($xml);
+		if (!$xml_object)
 		{
-			$xml_object = new SimpleXMLElement($xml);
-			if ($xml_object == false)
-			{
-				$this->error_message = "Kon XML resultaat niet verwerken";
-				return false;
-			}
-		}
-		catch (Exception $e) {
+			$this->error_code = -2;
+			$this->error_message = "Kon XML resultaat niet verwerken";
 			return false;
 		}
 
 		return $xml_object;
 	}
 
-	protected function _XMLisError($xml)
+	/**
+	 * Geeft het XML antwoord wat we van Mollie hebben ontvangen een error aan?
+	 *
+	 * @param $xml SimpleXMLElement
+	 * @return bool
+	 */
+	protected function _XMLisError(SimpleXMLElement $xml)
 	{
+		/*
+		 * Normale API errors, zoals ongeldige parameters et cetera.
+		 */
 		if (isset($xml->item))
 		{
 			$attributes = $xml->item->attributes();
@@ -314,9 +289,17 @@ class iDEAL_Payment
 			}
 		}
 
+		/*
+		 * iDEAL bank fouten.
+		 */
+		if (isset($xml->order->error) && (string) $xml->order->error == "true") {
+			$this->error_message = $xml->order->message;
+			$this->error_code = -1;
+			return true;
+		}
+
 		return false;
 	}
-
 
 	/* Getters en setters */
 	public function setProfileKey($profile_key)
@@ -366,8 +349,12 @@ class iDEAL_Payment
 
 	public function setAmount ($amount)
 	{
-		if (!preg_match('~^[0-9]+$~', $amount)) {
+		if (is_string($amount) && !ctype_digit($amount)) {
 			return false;
+		}
+
+		if (is_float($amount)) {
+			$amount = round($amount);
 		}
 
 		if (self::MIN_TRANS_AMOUNT > $amount) {
@@ -377,6 +364,9 @@ class iDEAL_Payment
 		return ($this->amount = $amount);
 	}
 
+	/**
+	 * @return int
+	 */
 	public function getAmount ()
 	{
 		return $this->amount;
@@ -396,10 +386,7 @@ class iDEAL_Payment
 
 	public function setReturnURL ($return_url)
 	{
-		if (!preg_match('|(\w+)://([^/:]+)(:\d+)?(.*)|', $return_url))
-			return false;
-
-		return ($this->return_url = $return_url);
+		return ($this->return_url = filter_var($return_url, FILTER_VALIDATE_URL));
 	}
 
 	public function getReturnURL ()
@@ -409,11 +396,7 @@ class iDEAL_Payment
 
 	public function setReportURL ($report_url)
 	{
-		if (!preg_match('|(\w+)://([^/:]+)(:\d+)?(.*)|', $report_url)) {
-			return false;
-		}
-
-		return ($this->report_url = $report_url);
+		return ($this->report_url = filter_var($report_url, FILTER_VALIDATE_URL));
 	}
 
 	public function getReportURL ()
@@ -468,5 +451,4 @@ class iDEAL_Payment
 	{
 		return $this->error_code;
 	}
-	
 }
