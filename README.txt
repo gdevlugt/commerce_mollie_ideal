@@ -1,2 +1,1 @@
-DO NOT USE THIS CODE. CODE IS INCOMPLETE AND STILL UNDER CONSTRUCTION
-
+The code should work but is still largely untested. Use at own risk.
